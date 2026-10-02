@@ -11,6 +11,11 @@ It does not rank SNPs on a single statistic (PBS, iHS, XP-EHH, …), instead it:
 
 The pipeline is four Jupyter notebooks, meant to be run in order.
 
+<p align="center">
+  <img src="pipeline_overview.web.png" alt="Overview of the MDS-sel pipeline" width="100%">
+</p>
+
+<sub>Figure sources: `pipeline_overview.cc.svg` (vector master, editable) and `pipeline_overview.cc.png` (1200 dpi, for print). The copy shown above is a downscaled web version. Regenerate the base figure with `python make_pipeline_figure.py`.</sub>
 ---
 
 ## Contents
@@ -52,8 +57,6 @@ A true sweep usually leaves a moderate signal in **several** statistics, not an 
 
 MDS-sel treats every SNP as a point in a multi-dimensional space of statistics. It then asks one question: **how far is this SNP from where neutral SNPs sit in that space?** Correlations between statistics are handled by the covariance matrix, so a signal is not counted twice.
 
-> **About the name.** The dimensionality reduction step is **PCA on standardized statistics**. On Euclidean distances, this gives the same result as **classical (metric) multidimensional scaling** (Torgerson MDS). That is where the name MDS-sel comes from. PCA is used in practice because a fitted PCA can *project* new points into an existing space, which classical MDS cannot do directly. The method needs this, because the space is fitted on intergenic SNPs only.
-
 ---
 
 ## Method overview
@@ -73,14 +76,11 @@ flowchart TD
     J --> K[NB3: Manhattan plots<br/>per population, coloured by sharing]
     J --> L[NB4: gene-level tables<br/>distance to nearest gene, shared genes]
 ```
-
-### Step by step, with the statistics
-
-**1. Neutral reference.** SNPs whose first SnpEff annotation is `intergenic_region` are used as the **empirical neutral background**. These sites are mostly free of direct functional constraint, so their combined distribution of statistics approximates what drift and demography alone produce.
+**1. Neutral reference.** SNPs whose first SnpEff annotation is `intergenic_region` are used as the empirical neutral background. Their combined distribution of statistics approximates what drift and demography produce without selection.
 
 **2. Standardization.** Every statistic is z-scored with the intergenic mean and standard deviation (`sklearn.preprocessing.StandardScaler`). This puts the statistics on a common scale; otherwise PBS (around 10⁻²) and iHS (around 1) would carry very different weight.
 
-**3. PCA, 6D to 2D.** A 2-component PCA is fitted **on intergenic SNPs only**. PC1 and PC2 are the two main axes of neutral co-variation among the statistics. All other SNPs are then projected with the *same* scaler and PCA, so the reference frame does not move.
+**3. PCA, multi-D to 2D.** A 2-component PCA is fitted **on intergenic SNPs only**. PC1 and PC2 are the two main axes of neutral co-variation among the statistics. All other SNPs are then projected with the *same* scaler and PCA, so the reference frame does not move. This creates a countour of values from the center of the distribution. 
 
 **4. Mahalanobis distance.** In the 2D space, with intergenic centroid **μ** and covariance **Σ**:
 
@@ -95,7 +95,7 @@ This is a distance that accounts for scale and correlation: it measures how unus
 - **KS statistic ≤ 0.03**: the Gaussian approximation is acceptable, and the threshold is `χ²₂` quantile at the chosen level (`method = "chi2"`).
 - **KS statistic > 0.03**: the neutral cloud is not Gaussian enough, and the threshold is the **empirical quantile** of intergenic `d²` (`method = "empirical"`).
 
-The KS *statistic* is used here, not its p-value. With hundreds of thousands of SNPs, the p-value is always about 0 and tells you nothing.
+Why using a KS *statistic*? In whole genome sequences, 100Ks of SNPs are represented. In this context the p-value is 0, so it cannot be used to detect distances.
 
 **6. Outliers.** Non-intergenic SNPs with `d²` above the threshold lie outside the neutral contour and are the **candidate selected variants**.
 
@@ -107,34 +107,19 @@ The KS *statistic* is used here, not its p-value. With hundreds of thousands of 
 
 ## Input format
 
-One gzipped, tab-separated file **per population**, with one row per SNP:
+One gzipped, tab-separated file **per population**, with one row per SNP ("dataset.nonan.tsv.gz"). These statistics are orientative; any other selection statistics can be used. To generate this file, we ran selscan v2.1 on a set of phased genomes in VCF and clustered all values together. 
 
 ```
 chr   pos      ref  alt  PBS       PBSn1     PBE       normihs   critihs  normnsl   critnsl  normxpehh  critxpehh  normxpnsl  critxpnsl  info
 chr1  914060   C    T    -0.0381   -0.0335   -0.0697   -1.28397  0        -0.710961 0        -0.0770566 0          0.166566   0          BaseQRankSum=...;ANN=T|upstream_gene_variant|MODIFIER|RP11-54O7.2|...
 ```
 
-| Column | Required | Description |
-|---|---|---|
-| `chr` | yes | Chromosome with a `chr` prefix (`chr1` … `chr22`). Only autosomes 1–22 are kept in the plots and tables. |
-| `pos` | yes | 1-based position |
-| `ref`, `alt` | no | Alleles (passed through to outputs) |
-| `PBS` | NB1 only | Raw PBS |
-| `PBSn1` | yes | Normalized PBS |
-| `PBE` | yes | Population Branch Excess |
-| `normihs` | yes | Normalized iHS (e.g. from `selscan` + `norm`) |
-| `normnsl` | yes | Normalized nSL |
-| `normxpehh` | yes | Normalized XP-EHH |
-| `normxpnsl` | yes | Normalized XP-nSL |
-| `crit*` | no | `norm` outlier flags (0/1). Not used by the method. |
-| `info` | yes | VCF INFO field with a **SnpEff `ANN=`** annotation. Used to tell intergenic from genic SNPs and to get gene names. |
-
 **Requirements:**
 - **No missing values** in the statistic columns (rows with NaN are dropped). The `*.nonan.tsv.gz` naming shows this filter has already been applied.
 - The `ANN=` field must follow the standard SnpEff layout `Allele|Effect|Impact|Gene_Name|Gene_ID|…`. The pipeline reads field 2 (**effect**, e.g. `intergenic_region`) and field 4 (**gene name**).
-- Column names must match **exactly**. Check that `normnsl` and `critnsl` are separate, tab-delimited columns and have not been merged into `normnslcritnsl`.
+- The Jupyter notebook can be modified to be used with other column names. All column names must be separate, tab-delimited columns.
 
-Gene-level annotation in notebook 4 also needs a **GENCODE GTF**. The example used `gencode.v43.annotation.gtf.gz` (GRCh38), and the GTF must match your reference build.
+Gene-level annotation in notebook 4 also needs a **GENCODE GTF**. The example used `gencode.v43.annotation.gtf.gz` (GRCh38 in humans), and the GTF must match your reference build.
 
 ---
 
@@ -147,16 +132,7 @@ conda create -n mds-sel python=3.11
 conda activate mds-sel
 pip install numpy pandas scipy scikit-learn matplotlib seaborn polars pyarrow pyranges jupyterlab
 ```
-
-| Package | Used in |
-|---|---|
-| numpy, pandas, scipy, matplotlib | all notebooks |
-| seaborn | NB1 (correlation heatmap) |
-| scikit-learn | NB2 (StandardScaler, PCA, KernelDensity) |
-| polars (+ pyarrow) | NB3, NB4 (fast loading of large TSVs) |
-| pyranges | NB4 (GTF parsing, nearest-gene lookup) |
-
-**Memory:** full genome-wide files (about 1.3 M SNPs × 16 columns plus the long `info` strings) need roughly **8–16 GB RAM**. On an HPC cluster, run Jupyter on a compute node, not a login node.
+**Memory:** full genome-wide files (about 1.3 M SNPs × 16 columns plus the long `info` strings) need roughly **8–16 GB RAM**. On an HPC cluster, run Jupyter on a compute node, not a login node. This can be used in a commercial laptop. 
 
 ---
 
@@ -173,20 +149,19 @@ Put the input `.tsv.gz` files (and the GTF for NB4) in the same directory as the
 **What it does:**
 - For each statistic, reports N, mean, SD, skewness and excess kurtosis, plus Shapiro–Wilk (on a 5,000-SNP subsample) and D'Agostino K² (on a 100,000-SNP subsample) normality tests.
 - Saves a histogram and Q-Q plot per statistic.
-- Applies a **rank-based inverse normal transform (INT)**, `Φ⁻¹((rank − 0.5)/N)`, and repeats the diagnostics.
+- Applies a **rank-based inverse normal transform (INT)**, `Φ⁻¹((rank − 0.5)/N)` to normalize all statistics and repeats the diagnostics.
 - Computes the **Pearson correlation matrix** of the INT statistics, draws a heatmap, and clusters the statistics hierarchically using distance `1 − |r|` with average linkage.
 
-**How to use the output:** look for statistics that are almost duplicates (high |r|, joined at the bottom of the dendrogram). Keep one from each tight cluster. For example, **PBS was dropped in favour of PBSn1** for NB2.
+**How to use the output:** look for statistics that are almost duplicates (high |r|, joined at the bottom of the dendrogram). Keep one from each tight cluster. For example, **PBS was dropped in favour of PBSn1** since they coincided in a 90%. 
 
 **Config:**
 ```python
-FILENAME   = "28lha_merged.nonan.tsv.gz"
+FILENAME   = "dataset.nonan.tsv.gz"
 STATS_COLS = ["PBS", "PBSn1", "PBE", "normihs", "normnsl", "normxpehh", "normxpnsl"]
 ```
 
 **Outputs:** `normality_plots/*.png`, `RAW_distribution_statistics.tsv`, `INT_distribution_statistics.tsv`, `INT_correlations.tsv`, `INT_heatmap.png`, `INT_cladogram.png`.
 
-> With about 10⁶ SNPs, normality tests reject for any departure at all. Judge normality from **skewness, kurtosis and the Q-Q plots**, not from the p-values.
 
 ### 2. Dimensionality reduction and Mahalanobis outliers
 
@@ -196,7 +171,7 @@ STATS_COLS = ["PBS", "PBSn1", "PBE", "normihs", "normnsl", "normxpehh", "normxpn
 
 **Config:**
 ```python
-FILENAME   = "14rau_merged.nonan.tsv.gz"   # change per population
+FILENAME   = "dataset.nonan.tsv.gz"   # change per population
 STATS_COLS = ["PBSn1", "PBE", "normihs", "normnsl", "normxpehh", "normxpnsl"]
 threshold  = 0.99                           # neutral quantile used to call outliers
 ```
@@ -222,9 +197,7 @@ threshold  = 0.99                           # neutral quantile used to call outl
 | `non_intergenic_snps.pkl` | Cached genic statistics matrix. |
 | `PCA_projection_intergenic_space.pval_<p>.png`, `Mahalanobis_distance_comparison.pval_<p>.png`, `Mahalanobis_QQ_comparison.pval_<p>.png`, `genic_enrichment_vs_threshold.png` | Figures. |
 
-> **Rename the output per population before moving on.** Notebooks 3 and 4 expect files named like `14rau.all_sites_with_mahalanobis.tsv.gz`, with a population prefix. The notebook always writes the generic `all_sites_with_mahalanobis.tsv.gz`, so the second population would overwrite the first.
-
-> **The reported `p_value` is always the χ² tail probability**, `1 − F_χ²₂(d²)`, even when the threshold was picked empirically because the KS test rejected χ². When `method = "empirical"`, treat these p-values as a **monotone ranking score**, not as calibrated probabilities. To get calibrated values, use the empirical tail instead: the fraction of intergenic `d²` that exceeds each SNP's `d²`.
+> **Rename the output per population before moving on.** Notebooks 3 and 4 expect files named like `dataset.all_sites_with_mahalanobis.tsv.gz`, with a population prefix. The notebook always writes the generic `all_sites_with_mahalanobis.tsv.gz`, so the second population would overwrite the first.
 
 ### 3. Manhattan plots
 
@@ -235,9 +208,9 @@ threshold  = 0.99                           # neutral quantile used to call outl
 **Config:**
 ```python
 files = {
-    "Raute":   "14rau.all_sites_with_mahalanobis.tsv.gz",
-    "Dailekh": "16dai.all_sites_with_mahalanobis.tsv.gz",
-    "Lhasa":   "28lha.all_sites_with_mahalanobis.tsv.gz",
+    "pop1":   "pop1.all_sites_with_mahalanobis.tsv.gz",
+    "pop2":   "pop2.all_sites_with_mahalanobis.tsv.gz",
+    "pop3":   "pop3.all_sites_with_mahalanobis.tsv.gz",
 }
 thresholds    = {"1e3": 1e-3, "1e4": 1e-4, "1e5": 1e-5, "1e6": 1e-6}
 peak_distance = 50000   # minimum bp between two gene labels
