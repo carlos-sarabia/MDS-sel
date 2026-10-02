@@ -57,21 +57,6 @@ MDS-sel treats every SNP as a point in a multi-dimensional space of statistics. 
 
 ## Method overview
 
-```mermaid
-flowchart TD
-    A[Input TSV.gz<br/>one row per SNP<br/>selection stats + SnpEff ANN] --> B[NB1: check distributions<br/>skew, kurtosis, QQ plots<br/>INT transform, correlations, clustering]
-    B --> C[Choose statistics<br/>drop redundant ones, e.g. PBS vs PBSn1]
-    C --> D[NB2: split SNPs by SnpEff annotation]
-    D --> E[Intergenic SNPs<br/>= neutral proxy]
-    D --> F[Non-intergenic SNPs<br/>= candidates]
-    E --> G[Standardize + PCA, 6D to 2D<br/>fitted on intergenic SNPs only]
-    G --> H[Mahalanobis distance d² to the<br/>intergenic centroid in PC1-PC2]
-    F -->|same scaler + PCA| H
-    H --> I[KS test of d² against χ²₂<br/>pick χ² or empirical threshold]
-    I --> J[all_sites_with_mahalanobis.tsv.gz<br/>d² + p-value for every SNP]
-    J --> K[NB3: Manhattan plots<br/>per population, coloured by sharing]
-    J --> L[NB4: gene-level tables<br/>distance to nearest gene, shared genes]
-```
 **1. Neutral reference.** SNPs whose first SnpEff annotation is `intergenic_region` are used as the empirical neutral background. Their combined distribution of statistics approximates what drift and demography produce without selection.
 
 **2. Standardization.** Every statistic is z-scored with the intergenic mean and standard deviation (`sklearn.preprocessing.StandardScaler`). This puts the statistics on a common scale; otherwise PBS (around 10⁻²) and iHS (around 1) would carry very different weight.
