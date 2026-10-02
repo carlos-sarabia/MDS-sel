@@ -11,11 +11,7 @@ It does not rank SNPs on a single statistic (PBS, iHS, XP-EHH, …), instead it:
 
 The pipeline is four Jupyter notebooks, meant to be run in order.
 
-<p align="center">
-  <img src="pipeline_overview.web.png" alt="Overview of the MDS-sel pipeline" width="100%">
-</p>
 
-<sub>Figure sources: `pipeline_overview.cc.svg` (vector master, editable) and `pipeline_overview.cc.png` (1200 dpi, for print). The copy shown above is a downscaled web version. Regenerate the base figure with `python make_pipeline_figure.py`.</sub>
 ---
 
 ## Contents
